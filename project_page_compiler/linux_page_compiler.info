@@ -1,0 +1,16 @@
+name = project Page Compiler
+description = Compiles standard Drupal pages from project source repositories.
+core = 7.x
+version = 7.x-1.5
+package = project.com
+
+dependencies[] = search_api
+
+; files
+files[] = includes/admin.inc
+files[] = includes/cache.inc
+files[] = includes/excerpt.inc
+files[] = includes/images.inc
+files[] = includes/render.inc
+files[] = includes/search.inc
+files[] = includes/views.inc

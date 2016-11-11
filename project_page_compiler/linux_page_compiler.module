@@ -1,0 +1,198 @@
+<?php
+/**
+ * @file
+ * Compiles standard Drupal pages from project source repositories.
+ */
+
+define('project_PAGE_COMPILER_PREG_CLASS_CJK', '\x{1100}-\x{11FF}\x{3040}-\x{309F}\x{30A1}-\x{318E}' . '\x{31A0}-\x{31B7}\x{31F0}-\x{31FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FCF}' . '\x{A000}-\x{A48F}\x{A4D0}-\x{A4FD}\x{A960}-\x{A97F}\x{AC00}-\x{D7FF}' . '\x{F900}-\x{FAFF}\x{FF21}-\x{FF3A}\x{FF41}-\x{FF5A}\x{FF66}-\x{FFDC}' . '\x{20000}-\x{2FFFD}\x{30000}-\x{3FFFD}'); 
+
+// Load the appropriate page compiler includes.
+module_load_include('inc', 'project_page_compiler', 'includes/cache');
+module_load_include('inc', 'project_page_compiler', 'includes/excerpt');
+module_load_include('inc', 'project_page_compiler', 'includes/render');
+module_load_include('inc', 'project_page_compiler', 'includes/search');
+module_load_include('inc', 'project_page_compiler', 'includes/views');
+
+/**
+ * Implements hook_search_api_item_type_info().
+ */
+function project_page_compiler_search_api_item_type_info() {
+  $types['source_page'] = array(
+    'name' => t('project source page'),
+    'datasource controller' => 'projectPageDataSourceController',
+  );
+  return $types;
+}
+
+/**
+ * Implements hook_cron().
+ */
+function project_page_compiler_cron() {
+  project_page_compiler_cache_set(); // Refreshes the source page cache variable.
+}
+
+/**
+ * Implements hook_permission().
+ */
+function project_page_compiler_permission() {
+  return array(
+    'administer project page compiler' => array(
+      'title' => t('Administer project page compiler'),
+      'description' => t('Configure sources for page compiler.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ *
+ * Creates custom menu router to deliver compiled pages from project source
+ * repositories. Utilizes argument wildcards to handle various pages that
+ * link to a specific source file.
+ */
+function project_page_compiler_menu() {
+  $module_path = drupal_get_path('module', 'project_page_compiler');
+
+  // Page routers.
+  $items['manpage/%'] = array(
+    'page callback' => 'project_page_compiler_render',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'file' => 'render.inc',
+    'file path' => $module_path .'/includes',
+    'type' => MENU_CALLBACK,
+  );
+  
+  $items['howto'] = array(
+    'page callback' => 'project_page_compiler_render',
+    'access arguments' => array('access content'),
+    'file' => 'render.inc',
+    'file path' => $module_path .'/includes',
+    'type' => MENU_CALLBACK,
+  );
+  $items['howto/%'] = array(
+    'page callback' => 'project_page_compiler_render',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'file' => 'render.inc',
+    'file path' => $module_path .'/includes',
+    'type' => MENU_CALLBACK,
+  );
+
+  // Image loader.
+  $items['page/image'] = array(
+    'page callback' => 'project_page_compiler_load_image',
+    'access arguments' => array('access content'),
+    'file' => 'images.inc',
+    'file path' => $module_path .'/includes',
+    'type' => MENU_CALLBACK,
+  );
+
+  // Administration pages.
+  $items['admin/config/project'] = array(
+    'title' => 'project',
+    'description' => 'Configure project modules.',
+    'position' => 'left',
+    'weight' => -50,
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('access administration pages'),
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+  );
+  $items['admin/config/project/pages'] = array(
+    'title' => 'Page compiler',
+    'description' => 'Configure settings for project page compiler.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('project_page_compiler_admin_settings'),
+    'access arguments' => array('administer project page compiler'),
+    'file' => 'admin.inc',
+    'file path' => $module_path .'/includes',
+  );
+
+  return $items;
+}
+
+/**
+ * Utility function; Loads the source page cache.
+ *
+ * @return array
+ *   Associtiave array of cached source pages.
+ */
+function project_page_compiler_load_cache() {
+  $cache = &drupal_static(__FUNCTION__ . ':cache', array());
+  if (empty($cache)) {
+    $cache = variable_get('project_page_cache', array());
+  }
+  if (empty($cache)) {
+    $cache = array(
+      'howto' => array(),
+      'manpage' => array(),
+    );
+  }
+  return $cache;
+}
+
+/**
+ * Utility function; Cleans filename for search index key.
+ *
+ * @param string $string
+ *   A simple text string to clean.
+ *
+ * @return hash
+ *   Returns hashed ID value (md5).
+ */
+function project_page_compiler_clean_filename($string) {
+  return md5(strtolower(str_replace('_', '-', $string)));
+}
+
+/**
+ * Utility function; Finds page type key from page ID.
+ *
+ * @param hash $page_id
+ *   The MD5 hashed page ID for the lookup.
+ *
+ * @return string
+ *   Returns name of the page key, or FALSE if not found.
+ */
+function project_page_compiler_find_key($page_id) {
+  $cache = project_page_compiler_load_cache();
+  foreach ($cache as $key => $pages) {
+    foreach ($pages as $this_page_id => $page_data) {
+      if ($page_id == $this_page_id) {
+        return $key; // The $key variable already contains the string needed.
+      }
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Custom version of PHPs file_exists
+ * Gets around case sensitivity per OS
+ * ie. Mac OS considers NAN.3.html & nan.3.html the same file
+ *
+ * @param string $file
+ *   The file path to search for.
+ *
+ * @return string
+ *   The path if found, FALSE otherwise.
+ *
+ * @see
+ *   Inspired by https://gist.github.com/jrsinclair/6036521
+ */
+function project_page_compiler_file_exists($file) {
+  $files_cache = variable_get('project_page_files_cache', array());
+  $filename = basename($file);
+
+  if (empty($files_cache[$filename])) {
+    foreach (glob(dirname($file).'/*') as $f) {
+      if ($filename === basename($f)) {
+        $files_cache[$filename] = $f;
+        variable_set('project_page_files_cache', $files_cache);
+        break;
+      }
+    }
+  }
+ 
+  return !empty($files_cache[$filename]) ? $files_cache[$filename] : FALSE;
+}

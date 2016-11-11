@@ -1,0 +1,38 @@
+<?php
+/**
+ * @file
+ * Creates a Search API indexing table for project source pages.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function project_page_compiler_schema() {
+  $schema['search_api_index_project_sources'] = array(
+    'description' => 'Stores the project source page indexing results.',
+    'fields' => array(
+      'item_id' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'index_id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'changed' => array(
+        'type' => 'int',
+        'size' => 'big',
+        'not null' => TRUE,
+        'default' => 1,
+      ),
+    ),
+    'indexes' => array(
+      'indexing' => array('index_id', 'changed'),
+    ),
+    'primary key' => array('item_id', 'index_id'),
+  );
+  return $schema;
+}
